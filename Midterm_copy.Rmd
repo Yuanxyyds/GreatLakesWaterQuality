@@ -1,0 +1,982 @@
+---
+title: "JSC370 Midterm Report"
+subtitle: "Identify and Monitor the Most Phosphorous-Polluted Locations in the Great Lakes"
+author: "Steven Liu"
+date: "2023-03-07"
+output:
+  html_document:
+    df_print: paged
+    fig.width: 6
+---
+
+<style type="text/css">
+  body{
+  font-size: 12pt;
+}
+</style>
+
+<style>
+.html-widget {
+    margin: auto;
+}
+</style>
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = FALSE, fig.align = 'center')
+library(car)
+library(zoo)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(leaflet)
+library(rvest)
+library(xml2)
+library(patchwork)
+library(htmlwidgets)
+library(DT)
+```
+
+# Introduction
+
+The Great Lakes are a group of five interconnected freshwater lakes located in North America, consisting of Lakes Superior, Michigan, Huron, Erie, and Ontario. As the world's largest freshwater system, the Great Lakes hold approximately 20% of the world's freshwater and serve as a vital source of drinking water for human and diverse array of plant and animal species. However, the rapid growth in industrialization, urbanization has caused considerable damage to the Great Lakes. Starting early 1900s, Industrial waste from factories and mills along the Great Lakes, the overuse of pesticides and fertilizers in agriculture, led to a higher presence of chemical contaminants in the Great Lakes which can have a significant impact on human health.
+
+
+As the main chemical contaminants, the excess of Phosphorus can lead to harmful algal blooms and other negative impacts on water quality. When high levels of phosphorus enter a lake, either from agricultural runoff, wastewater discharges, or other sources, it can trigger the growth of harmful algae, which can deplete oxygen levels in the water and create "dead zones" where fish and other aquatic life cannot survive. The worsen in Great Lakes' water quality began to draw government's attention in 1970s. The United States and Canada signed [The Great Lakes Water Quality Agreement](https://www.epa.gov/glwqa), to establish a framework for cooperative efforts to monitor and improve the water quality of the Great Lakes. The agreement sets targets for reducing pollutants, promoting sustainable development, and protecting biodiversity in the region. 
+
+
+As a result of the agreement, significant progress has been made in reducing pollution and improving water quality in the Great Lakes. The levels of some pollutants, such as PCBs and mercury, have decreased, and efforts to address invasive species and habitat restoration have helped to improve the health of the lakes' ecosystems. However, some reports stated, there are still ongoing threats to the Great Lakes, including nutrient pollution, and emerging contaminants, which highlight the need for continued collaboration and action to protect this vital resource. As a reaction, the Canadian government had built hundreds of water detection stations and collect data seasonally from 2000 to present about the Water quality and ecosystem health data to long-termly monitor the health of Great Lakes.
+
+
+The dataset, [The Great Lakes Water Quality Monitoring and Surveillance Data](https://data-donnees.ec.gc.ca/data/substances/monitor/great-lakes-water-quality-monitoring-and-aquatic-ecosystem-health-data/great-lakes-water-quality-monitoring-and-surveillance-data/?lang=en), contains records on centration levels of all the chemical contaminants, as well as the regular statistic about Lakes (i.e. Lake Depth, Lake PH) ranging from 2000 to present in Lake Erie, Lake Superior, Lake Ontario and Lake Erie (Lake Michigan's data is missing). 
+
+
+In this report, we seek to answer the following question based on The Great Lakes Water Quality Monitoring and Surveillance Data: **In which locations/cities of the Great Lakes have the worst water qualities and is there an improvement in water quality in these mostly polluted locations from 2000 to present?** Specifically, we will use the concentration of Phosphorus as the water quality indicator to trace the level of Phosphorus from 2000 to present at different locations.
+
+# Method
+
+In order to answer the research question, we perform an analysis that mainly follows methods that are full explained in: [Data Collection - Data Reading and Web Scraping], [Data Cleaning], [Data Summary and Merging], and [Data Exploration and Visualization]. The [Preliminary Results] section provides additional method to interpret these data.
+
+### Data Collection - Data Reading and Web Scraping
+
+The Canadian Open Data Portal provides 5 separate, downloadable `csv` files [online](https://data-donnees.ec.gc.ca/data/substances/monitor/great-lakes-water-quality-monitoring-and-aquatic-ecosystem-health-data/great-lakes-water-quality-monitoring-and-surveillance-data/?lang=en) about the Great Lakes water quality monitoring data. Each file contains data for a single Great Lake, except for Lake Michigan, which is not part of the Great Lakes Surveillance Program, and Georgian Bay, which has a separate file from Lake Huron. These raw data files are simply loaded separately by `read.csv`, and then bind together as a full raw dataset named `water` by `rbind`. The raw data `water` contains 1338620 observations of 22 variables.
+
+```{r}
+# Read Data
+water1 <- read.csv("Lake Ontario_Water Quality_2000-present.csv")
+water2 <- read.csv("Lake Erie_Water Quality_2000-present.csv")
+water3 <- read.csv("Lake Superior_Water Quality_2000-present.csv")
+water4 <- read.csv("Lake Huron_Water Quality_2000-present.csv")
+water5 <- read.csv("Georgian Bay_Water Quality_2000-present.csv")
+# Bind data for great lakes together
+water <- rbind(water1, water2, water3, water4, water5)
+```
+
+Since the `water` dataset does not include detailed geometric information for each water surveillance station, such as their closest city, a second dataset has been introduced. This dataset collects the name, latitude, and longitude of all cities and possibly some towns in the USA and Canada, which is useful for interpretation. To get these data, we perform web scraping from [LatLong](https://www.latlong.net/). Four keywords we used in searching data are ["Canada Cities"](https://www.latlong.net/category/cities-40-15.html), "Canada Towns", "USA Towns" and ["USA Cities"](https://www.latlong.net/category/cities-236-15.html). All of these data are in tables within 16 different `HTML` pages, we use `read_html` and `html_table` to read the table content in each page, and use `bind_rows` to efficiently bind these tables into one dataset, `city`.
+
+```{r, eval=FALSE}
+# Add Canada Cities
+city <- html_table(xml2::xml_find_all(
+  read_html(x ="https://www.latlong.net/category/cities-40-15.html"),
+          xpath = "/html/body/main/table"))[[1]]
+for (i in 2:4){
+  html <- paste0(
+    substring("https://www.latlong.net/category/cities-40-15-2.html", 1, 45),
+    '-', i,'.html')
+  city <- bind_rows(city, html_table(xml2::xml_find_all(
+    read_html(x = html),
+    xpath = "/html/body/main/table"))[[1]])
+}
+```
+
+```{r, eval=FALSE}
+# Add U.S. Cities
+city <- bind_rows(city, html_table(xml2::xml_find_all(
+  read_html(x ="https://www.latlong.net/category/cities-236-15.html"),
+          xpath = "/html/body/main/table"))[[1]])
+
+for (i in 2:12){
+  html <- paste0(
+    substring("https://www.latlong.net/category/cities-236-15-2.html", 1, 46),
+    '-', i,'.html')
+  city <- bind_rows(city, html_table(xml2::xml_find_all(
+    read_html(x = html),
+    xpath = "/html/body/main/table"))[[1]])
+}
+```
+
+In addition, we manually added the geometric locations of some ports to `city`, and for each lake, we added three locations (the center, west, and east) to `city`. The raw dataset `city` contains 1526 observations of 3 variables.
+
+```{r, eval=FALSE}
+# Add additional cities
+additional_city <- read.csv("Additional_cities.csv")
+additional_city <- additional_city %>%
+  mutate(`Place Name` = Place.Name) %>% 
+  select(-Place.Name)
+
+city <- bind_rows(city, additional_city)
+```
+
+
+### Data Cleaning
+
+Table 1 below displays the first 5 rows of the dataset `water`, providing an initial overview of the dataset and highlighting potential cleaning steps. Firstly, we observed that the `STN_DATE` column in the raw data is not formatted correctly to be converted into a `yearmon` object. To resolve this, we converted all `STN_DATE` values into `YYYY-MM` format and saved them as `yearmon` type. Furthermore, for future convenience, we extracted the `year` and `month` from `STN_DATE` and saved them as separate integer variables.
+
+```{r, include=TRUE}
+# Head the first 5 rows
+datatable(
+  head(water, 5), 
+  options = list(
+    scrollX = TRUE, 
+    scrollY = FALSE,
+    paging = FALSE,
+    dom = 't'
+  ),
+  rownames = FALSE,
+  caption = "Table 1 - Top 5 rows of the row dataset water"
+) %>%
+formatStyle(
+  columns = 1:22,
+  border = "1px solid black"
+)
+```
+
+
+Our analysis revealed that the number of records in our dataset is unevenly distributed between the years 2000 to 2023. To address this issue, we introduced a new categorical variable called `range`, which categorizes each observation into one of five time periods: "2000-2005," "2005-2010," "2010-2015," "2015-2020," and "2020-present." Additionally, to ensure consistency in our labeling, we re-categorized all observations originally labeled as "Georgian Bay" to "Lake Huron." This adjustment provides a more accurate representation of our data.
+
+```{r}
+water_reduced <- water %>% 
+  # Rename main variables, and create separate column for year and month
+  mutate(lake = ifelse(WATER_BODY == "GEORGIAN BAY", "LAKE HURON", WATER_BODY),
+         station = paste0(WATER_BODY," ",as.character(as.integer(PSN))), 
+         year = as.integer(substr(STN_DATE, start = 7, stop = 10)),
+         month = as.integer(substr(STN_DATE, start = 4, stop = 5)),
+         yearmon = as.yearmon(paste0(year, "-", month)),
+         range = case_when(year <= 2005 ~ "2000-2005",
+                           (year > 2005 & year <= 2010) ~ "2005-2010",
+                           (year > 2010 & year <= 2015) ~ "2010-2015",
+                           (year > 2015 & year <= 2020) ~ "2015-2020",
+                           TRUE ~ "2020-present"),
+         hazard_name = FULL_NAME,
+         unit = UNITS,
+         value = VALUE,
+         lat = LATITUDE_DD,
+         # We notice that the lon is actually - LONGITUDE
+         lon = - LONGITUDE_DD) %>% 
+ # Select main variables of interest
+  select(lake, station, year, month, yearmon, range, hazard_name, value, lat, lon) 
+```
+
+
+Looking closer to the data, we removed all rows with missing values in our primary variables of interest. Further details about these variables can be found in the [Data Summary and Merging] section. We also treated `VALUE` entries of zero as missing values and removed them from our dataset. During our analysis, we used Google Maps to verify the longitude values and found that they were negative in the raw dataset. To correct this, we multiplied all longitude values by a factor of -1. Additionally, the longitude and latitude values for each water station varied slightly over the years. To ensure consistency, we calculated the mean value of longitude and latitude across all years for each station. These adjustments ensure that our data is accurate and standardized for analysis.
+
+```{r}
+# Remove NA
+water_reduced <- na.omit(water_reduced)
+water_reduced <- water_reduced %>% filter(value > 0)
+
+# As we notice that the lat and lon for each station is different, we want to use mean as their lat and lon
+water_reduced <- water_reduced %>% group_by(station) %>% mutate(lat = mean(lat),
+                                               lon = mean(lon)) 
+# Remove duplicate
+water_reduced <- unique(water_reduced)
+```
+
+Finally, to focus our analysis on phosphorus levels, we filtered our dataset into `water_phos` to only include observations where the FULL_NAME chemical name was either "PHOSPHOROUS,TOTAL" or "TOTAL PHOSPHOROUS". These two names represent the same chemical, but it was named "PHOSPHOROUS,TOTAL" before 2015 and "TOTAL PHOSPHOROUS" afterward. We define phosphorous level < 0.1 as Good, 0.1 <= phosphorous level < 0.25, and phosphorous level >= 0.25 as Very Bad.
+
+```{r}
+# Select the phosphorous 
+water_phos <- water_reduced %>% 
+  filter(hazard_name == "PHOSPHOROUS,TOTAL" | hazard_name == "TOTAL PHOSPHOROUS") %>% 
+  mutate(level = case_when(value < 0.1 ~ "Good", 
+                           value >= 0.1 & value < 0.25 ~ "Poor",
+                           TRUE ~ "Very Bad"))
+# Check for missing/error values
+summary(water_phos)
+```
+
+```{r}
+# Add Canada Cities
+city <- html_table(xml2::xml_find_all(
+  read_html(x ="https://www.latlong.net/category/cities-40-15.html"),
+          xpath = "/html/body/main/table"))[[1]]
+for (i in 2:4){
+  html <- paste0(
+    substring("https://www.latlong.net/category/cities-40-15-2.html", 1, 45),
+    '-', i,'.html')
+  city <- bind_rows(city, html_table(xml2::xml_find_all(
+    read_html(x = html),
+    xpath = "/html/body/main/table"))[[1]])
+}
+```
+
+
+The `city` dataset, obtained through web scraping, contains information about towns and cities in Canada and the USA. However, we only required information about cities located near the Great Lakes. To reduce computation costs and improve relevance, we filtered the dataset into `city_lake` to only include cities within a specific geographic range. Specifically, we retained cities located between "Ottawa, ON, Canada", "Winkler, MB, Canada", "Mansfield, OH, USA", and "Fermont, QC, Canada". 
+
+```{r}
+# Add U.S. Cities
+city <- bind_rows(city, html_table(xml2::xml_find_all(
+  read_html(x ="https://www.latlong.net/category/cities-236-15.html"),
+          xpath = "/html/body/main/table"))[[1]])
+
+for (i in 2:12){
+  html <- paste0(
+    substring("https://www.latlong.net/category/cities-236-15-2.html", 1, 46),
+    '-', i,'.html')
+  city <- bind_rows(city, html_table(xml2::xml_find_all(
+    read_html(x = html),
+    xpath = "/html/body/main/table"))[[1]])
+}
+```
+
+```{r}
+# Add additional cities
+additional_city <- read.csv("Additional_cities.csv")
+additional_city <- additional_city %>%
+  mutate(`Place Name` = Place.Name) %>% 
+  select(-Place.Name)
+
+city <- bind_rows(city, additional_city)
+```
+
+```{r}
+# Lake Cities
+lake_city <- city %>% 
+  filter(Latitude > city[`Place Name` == "Mansfield, OH, USA",]$Latitude)
+lake_city <- lake_city %>% 
+  filter(Latitude < lake_city[`Place Name` == "Fermont, QC, Canada",]$Latitude)
+lake_city <- lake_city %>% 
+  filter(Longitude > lake_city[`Place Name` == "Winkler, MB, Canada",]$Longitude)
+lake_city <- lake_city %>% 
+  filter(Longitude < lake_city[`Place Name` == "Ottawa, ON, Canada",]$Longitude)
+
+lake_city <- lake_city %>% filter(`Place Name` != "Monroe, OH, USA")
+```
+
+### Data Summary and Merging
+
+To improve the readability and clarity of our datasets, we renamed all primary variables. The Table 2 below shows a summary of all primary variables and their corresponding descriptions. After undergoing the data cleaning process, our clean dataset `water_phos` now consists of 12373 observations and 11 variables. Similarly, our clean dataset `lake_city` has 257 observations and 3 variables.
+
+
+```{r, include=TRUE}
+data_description <- read.csv("Datasummary.csv")
+
+datatable(
+  data_description, 
+  options = list(
+    scrollX = TRUE, 
+    scrollY = "300px",
+    paging = FALSE,
+    dom = 't'
+  ),
+  rownames = FALSE,
+  caption = "Table 2 - Data Summary for both dataset"
+) %>%
+formatStyle(
+  columns = 1:22,
+  border = "1px solid black"
+)
+```
+<br>
+Next, we will merge the `water_phos` and `lake_city` datasets to create a larger dataset called `water_phos_with_city`. To achieve this, we will use the `crossing` function in `dplyr` to create an intermediate dataframe containing all possible combinations of water data and city data. For each possible combination, we will calculate the Euclidean distance between the city and water station using the following formula:
+
+$$\text{distance} = \sqrt{(\text{lat} - \text{lat_city})^2 + (\text{lon} - \text{lon_city})^2}$$
+
+After calculating the distance, we will use the `group_by` function to group each station and select the `min(distance)` as the closest city to that station. Table 3 below presents the 5 random rows of the resulting `water_phos_with_city` dataset.
+
+```{r}
+# For each station, find its nearest city
+water_phos_with_city <- water_phos %>% 
+  crossing(lake_city) %>% 
+  mutate(distance = sqrt((lat - Latitude) ** 2 + (lon - Longitude) ** 2)) %>% 
+  group_by(station) %>% 
+  filter(distance == min(distance)) %>%
+  mutate(city = `Place Name`,
+         lon_city = Longitude,
+         lat_city = Latitude) %>% 
+  select(-`Place Name`, -Longitude, -Latitude)
+```
+
+
+```{r, include=TRUE}
+datatable(
+  water_phos_with_city[c(10, 30, 9000, 5000, 12000),], 
+  options = list(
+    scrollX = TRUE, 
+    scrollY = FALSE,
+    paging = FALSE,
+    dom = 't'
+  ),
+  rownames = FALSE,
+  caption = "Table 3 - 5 random rows of the merged dataset water_phos_with_city dataset"
+) %>%
+formatStyle(
+  columns = 1:22,
+  border = "1px solid black"
+)
+```
+### Data Exploration and Visualization
+
+
+After obtaining the clean and valid `water_phos_with_city` dataset, we can investigate patterns in the data. Our first task is to identify which Great Lakes are mostly polluted and which ones are clean. To accomplish this, we will create two time series plots that show the mean phosphorus level of each Great Lake over time. The first plot will be generated by grouping our dataset by lake and yearmon. While this plot provides more detailed information about how each lake's phosphorus level changes over months, it may be misleading if some months have fewer data points. To account for this, we will include a second plot generated by grouping the data by lake and year, which will provide a smoother representation of the data but with less details. We present both plots in Figure 1 and Figure 2 below: 
+<br>
+
+```{r}
+# Average Phosphorous per Lake
+average_per_lake <- water_phos %>% group_by(lake, yearmon) %>% 
+  summarise(mean_value = mean(value), n = n())
+```
+
+```{r}
+# Average Phosphorous per Lake adjusted
+average_per_lake_adj <- water_phos %>% group_by(lake, year) %>% 
+  summarise(mean_value = mean(value), n = n())
+```
+
+
+```{r, include = TRUE}
+# Plot the time series for mean phosphorous level of Great Lakes
+time_series <- average_per_lake %>% ggplot(aes(color = lake)) +
+  geom_line(aes(y = mean_value, x = yearmon)) + 
+  labs(title = "Figure 1 - Time Series for Mean Phosphorous Level of Great Lakes",
+       y = "Phosphorous Level (mg/L)",
+       x = "Month/Year")
+```
+
+
+```{r}
+# Plot the time series for mean phosphorous level of Great Lakes
+time_series_adj <- average_per_lake_adj %>% ggplot(aes(color = lake)) +
+  geom_line(aes(y = mean_value, x = year)) + 
+  labs(title = "Figure 2 - Adjust Time Series for Mean Phosphorous Level of Great Lakes",
+       y = "Phosphorous Level (mg/L)",
+       x = "Year")
+```
+
+<center id="Fig1">   </center> 
+```{r, include = TRUE}
+# Arrange the plots using patchwork
+time_series + time_series_adj + plot_layout(nrow = 2)  
+```
+
+To visualize the differences in phosphorus levels across lakes and the distribution of sample values for each lake, we will use a boxplot to display the phosphorus values of samples from various lakes.
+
+<center id="Fig3">   </center> 
+
+```{r, include = TRUE}
+ggplot(water_phos_with_city, aes(x = lake, y = value, fill = lake)) +
+  geom_boxplot() +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Figure 3 - The boxplot showing the value of samples in different lakes", x = "Lake", y = "Value")
+```
+<br>
+We will now visualize the phosphorus values for each individual station using `leaflet`. Each station will be represented as a circle on the leaflet map at its corresponding latitude and longitude coordinates, with a color scale ranging from green to red to represent its phosphorus value. The phosphorous value for each station is computed by taking the mean value of all the observation from that station in the selected time period. We provide four different time periods by variable `range`, plus additional one with the grand mean for that station over 2000-present. Besides, for each lake, we add 10 markers to identify the 10 most polluted station in this lake. Note that the only stations we are considering are stations with data more than 3 years.
+<br>
+
+
+```{r}
+# Average Phosphorous per Lake Station Regardless on Time
+average_per_lake_station <- water_phos_with_city %>% 
+  group_by(lake, station, lon, lat, lon_city, lat_city, city) %>% 
+  summarise(mean_value = mean(value), 
+            time_difference = max(yearmon) - min(yearmon)) %>%
+  # We want to only consider station with data more than 3 years
+  filter(time_difference > 3)
+
+# 10 Most Polluted stations per Lake 
+top_10_station_per_lake <- average_per_lake_station %>% 
+  group_by(lake) %>% 
+  slice_max(order_by = mean_value, n = 10)
+
+top_10_station_per_lake
+```
+```{r}
+# Average Phosphorous per Lake Station by Time Period
+average_per_lake_station_with_period <- water_phos_with_city %>% 
+  group_by(lake, station, lon, lat, city, lon_city, lat_city, range) %>% 
+  summarise(mean_value = mean(value), 
+            n = n()) %>% 
+  filter(station %in% average_per_lake_station$station)
+
+# 10 Most Polluted stations per Lake 
+top_10_station_per_lake_with_period <- average_per_lake_station_with_period %>% 
+  group_by(lake, range) %>% 
+  slice_max(order_by = mean_value, n = 10)
+
+top_10_station_per_lake_with_period
+```
+
+<center id="lf1"> Leaflet Map 1 - Phosphorous level for individual station </center>
+```{r, include = TRUE}
+
+color_scheme <- colorNumeric(c('green', 'red', 'darkred'),
+                       domain = average_per_lake_station_with_period$mean_value)
+  
+
+leaflet() %>% 
+  addProviderTiles('OpenStreetMap') %>% 
+  # Default
+  addPolylines(
+    lng = c(-180, 180),
+    lat = c(45, 45),
+    dashArray = "10, 10",
+    color = "red"
+  ) %>% 
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 1000, 
+             popup = paste0(average_per_lake_station$station,
+                            ": \n",
+                            average_per_lake_station$mean_value),
+             data = average_per_lake_station, 
+             group = "2000-present") %>% 
+  addAwesomeMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_10_station_per_lake, 
+             popup = paste0(top_10_station_per_lake$station,
+                            ": \n",
+                            top_10_station_per_lake$mean_value), 
+             group = "2000-present") %>% 
+  # 2000-2005
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 1000, 
+             popup = paste0(average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2000-2005",
+             ]$station,
+                            ": \n",
+                            average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2000-2005",
+             ]$mean_value),
+             data = average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2000-2005",
+             ], 
+             group = "2000-2005") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2000-2005",
+             ], 
+             popup = paste0(top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2000-2005",
+             ]$station,
+                            ": \n",
+                            top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2000-2005",
+             ]$mean_value), 
+             group = "2000-2005") %>% 
+  # 2005-2010
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 1000, 
+             popup = paste0(average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2005-2010",
+             ]$station,
+                            ": \n",
+                            average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2005-2010",
+             ]$mean_value),
+             data = average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2005-2010",
+             ], 
+             group = "2005-2010") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2005-2010",
+             ], 
+             popup = paste0(top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2005-2010",
+             ]$station,
+                            ": \n",
+                            top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2005-2010",
+             ]$mean_value), 
+             group = "2005-2010") %>% 
+  # 2010-2015
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 1000, 
+             popup = paste0(average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2010-2015",
+             ]$station,
+                            ": \n",
+                            average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2010-2015",
+             ]$mean_value),
+             data = average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2010-2015",
+             ], 
+             group = "2010-2015") %>% 
+   addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2010-2015",
+             ], 
+             popup = paste0(top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2010-2015",
+             ]$station,
+                            ": \n",
+                            top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2010-2015",
+             ]$mean_value), 
+             group = "2010-2015") %>% 
+  # 2015-2020
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 1000, 
+             popup = paste0(average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2015-2020",
+             ]$station,
+                            ": \n",
+                            average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2015-2020",
+             ]$mean_value),
+             data = average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2015-2020",
+             ], 
+             group = "2015-2020") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2015-2020",
+             ], 
+             popup = paste0(top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2015-2020",
+             ]$station,
+                            ": \n",
+                            top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2015-2020",
+             ]$mean_value), 
+             group = "2015-2020")%>% 
+  # 2020-present
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 1000, 
+             popup = paste0(average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2020-present",
+             ]$station,
+                            ": \n",
+                            average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2020-present",
+             ]$mean_value),
+             data = average_per_lake_station_with_period[
+               average_per_lake_station_with_period$range == "2020-present",
+             ], 
+             group = "2020-present") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2020-present",
+             ], 
+             popup = paste0(top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2020-present",
+             ]$station,
+                            ": \n",
+                            top_10_station_per_lake_with_period[
+               top_10_station_per_lake_with_period$range == "2020-present",
+             ]$mean_value), 
+             group = "2020-present")%>% 
+
+  addLegend("bottomleft", pal = color_scheme, 
+            average_per_lake_station$mean_value,
+            title = "Phosphorous (mg/L)", 
+            opacity = 1) %>% 
+  setView(lng = -81, lat = 45, zoom = 5.3) %>%
+  # Layers control
+  addLayersControl(
+    baseGroups = c("2000-present", "2000-2005", "2005-2010",
+                   "2010-2015", "2015-2020","2020-present"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+```
+<br>
+To improve the geometrical interpretation of the data, we will create a second leaflet to visualize the phosphorus values grouped by city. This leaflet will focus on Lake Ontario and Lake Erie only. As each city may have multiple stations in water_phos_with_city, we will compute the average latitude and longitude of these stations to represent the city. Similarly, we will compute the average phosphorus value for each city based on all observations during the selected time period. The variable range provides four different time periods, plus an additional one with the grand mean from 2000 to the present. In addition, we will add five markers to identify the five most polluted cities in each lake. Note that the only cities we are considering are cities with data more than 3 years.
+<br>
+
+```{r}
+# Average Phosphorous per Lake - City
+average_per_city <- water_phos_with_city %>% 
+  group_by(lake, lon_city, lat_city, city) %>% 
+  summarise(lon = mean(lon),
+            lat = mean(lat),
+            mean_value = mean(value), 
+            time_difference = max(yearmon) - min(yearmon)) %>%
+  # We want to only consider station with data more than 3 years
+  filter(time_difference > 3) %>% 
+  filter(lake == "LAKE ONTARIO" | lake == "LAKE ERIE")
+
+# 5 Most Polluted Cities per Lake 
+top_5_city_per_lake <- average_per_city %>% 
+  group_by(lake) %>% 
+  slice_max(order_by = mean_value, n = 5)
+
+top_5_city_per_lake
+```
+```{r}
+# Average Phosphorous per Lake Station by Time Period
+average_per_city_with_period <- water_phos_with_city %>% 
+  group_by(lake, lon_city, lat_city, city, range) %>% 
+  summarise(lon = mean(lon),
+            lat = mean(lat),
+            mean_value = mean(value), 
+            n = n()) %>%
+  filter(city %in% average_per_city$city) %>% 
+  filter(lake == "LAKE ERIE" | lake == "LAKE ONTARIO")
+
+
+# 5 Most Polluted Cities per Lake 
+top_5_city_per_lake_with_period <- average_per_city_with_period %>% 
+  group_by(lake, range) %>% 
+  slice_max(order_by = mean_value, n = 5)
+
+top_5_city_per_lake_with_period
+```
+
+<center id="lf2"> Leaflet Map 2 - Phosphorous level for Lake Ontario/Erie's coast cities </center>
+```{r, include = TRUE}
+color_scheme <- colorNumeric(c('green', 'red', 'darkred'),
+                       domain = average_per_lake_station_with_period$mean_value)
+
+leaflet() %>% 
+  addProviderTiles('OpenStreetMap') %>% 
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 3000, 
+             popup = paste0(average_per_city$city,
+                            ": \n",
+                            average_per_city$mean_value),
+             data = average_per_city, group = "2000-present") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_5_city_per_lake, 
+             popup = paste0(top_5_city_per_lake$city,
+                            ": \n",
+                            top_5_city_per_lake$mean_value), group = "2000-present") %>% 
+
+  # 2000-2005
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 3000, 
+             popup = paste0(average_per_city_with_period[
+              average_per_city_with_period$range == "2000-2005",
+             ]$city,
+                            ": \n",
+                           average_per_city_with_period[
+              average_per_city_with_period$range == "2000-2005",
+             ]$mean_value),
+             data = average_per_city_with_period[
+              average_per_city_with_period$range == "2000-2005",
+             ], group = "2000-2005") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2000-2005",
+              ], 
+             popup = paste0(top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2000-2005",
+              ]$city,
+                            ": \n",
+                            top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2000-2005",
+              ]$mean_value), group = "2000-2005") %>%  
+  
+  # 2005-2010
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 3000, 
+             popup = paste0(average_per_city_with_period[
+              average_per_city_with_period$range == "2005-2010",
+             ]$city,
+                            ": \n",
+                           average_per_city_with_period[
+              average_per_city_with_period$range == "2005-2010",
+             ]$mean_value),
+             data = average_per_city_with_period[
+              average_per_city_with_period$range == "2005-2010",
+             ], group = "2005-2010") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2005-2010",
+              ], 
+             popup = paste0(top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2005-2010",
+              ]$city,
+                            ": \n",
+                            top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2005-2010",
+              ]$mean_value), group = "2005-2010") %>%  
+  # 2010-2015
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 3000, 
+             popup = paste0(average_per_city_with_period[
+              average_per_city_with_period$range == "2010-2015",
+             ]$city,
+                            ": \n",
+                           average_per_city_with_period[
+              average_per_city_with_period$range == "2010-2015",
+             ]$mean_value),
+             data = average_per_city_with_period[
+              average_per_city_with_period$range == "2010-2015",
+             ], group = "2010-2015") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2010-2015",
+              ], 
+             popup = paste0(top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2010-2015",
+              ]$city,
+                            ": \n",
+                            top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2010-2015",
+              ]$mean_value), group = "2010-2015") %>%  
+  
+  # 2015-2020
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 3000, 
+             popup = paste0(average_per_city_with_period[
+              average_per_city_with_period$range == "2015-2020",
+             ]$city,
+                            ": \n",
+                           average_per_city_with_period[
+              average_per_city_with_period$range == "2015-2020",
+             ]$mean_value),
+             data = average_per_city_with_period[
+              average_per_city_with_period$range == "2015-2020",
+             ], group = "2015-2020") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2015-2020",
+              ], 
+             popup = paste0(top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2015-2020",
+              ]$city,
+                            ": \n",
+                            top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2015-2020",
+              ]$mean_value), group = "2015-2020") %>%  
+  # 2020-present
+  addCircles(lng = ~lon,
+             lat = ~lat, 
+             color = ~color_scheme(mean_value), 
+             fillOpacity = 1, 
+             radius = 3000, 
+             popup = paste0(average_per_city_with_period[
+              average_per_city_with_period$range == "2020-present",
+             ]$city,
+                            ": \n",
+                           average_per_city_with_period[
+              average_per_city_with_period$range == "2020-present",
+             ]$mean_value),
+             data = average_per_city_with_period[
+              average_per_city_with_period$range == "2020-present",
+             ], group = "2020-present") %>% 
+  addMarkers(lat=~lat, 
+             lng=~lon, 
+             data = top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2020-present",
+              ], 
+             popup = paste0(top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2020-present",
+              ]$city,
+                            ": \n",
+                            top_5_city_per_lake_with_period[
+              top_5_city_per_lake_with_period$range == "2020-present",
+              ]$mean_value), group = "2020-present") %>%  
+  
+  addLegend("bottomleft", pal = color_scheme, 
+            average_per_lake_station$mean_value,
+            title = "Phosphorous (mg/L)", 
+            opacity = 1) %>% 
+  setView(lng = -80, lat = 43, zoom = 6.2) %>%
+  # Layers control
+  addLayersControl(
+    baseGroups = c("2000-present", "2000-2005", "2005-2010", "2010-2015",
+                   "2015-2020", "2020-present"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+```
+
+## Preliminary Results
+
+The primary research question that motivates this study is: 'Which locations/cities in the Great Lakes region have the worst water quality, and is there evidence of improvements in water quality at these locations from 2000 to the present?' To address the first part of this question, we compare the average phosphorus levels across the different Great Lakes. Referring to both  <a href='#Fig1'>Figure 1-2</a> and <a href='#lf1'>Leaflet 1</a>, we can identify Lake Erie as having the highest average phosphorus level, followed by Lake Ontario with the second-highest average. Meanwhile, the other two lakes have significantly lower phosphorus levels than these two.
+
+To verify that Lake Ontario and Lake Erie are the two most polluted lakes in terms of phosphorus levels, we examine the boxplot in <a href='#Fig3'>Figure 3</a>. The median phosphorus level for Lake Erie and Lake Ontario is evidently higher than for Lake Huron and Lake Superior. Furthermore, the boxplot reveals a right skew for data from Lake Erie and Lake Ontario, indicating that these two lakes have more samples that have been detected as 'very bad.' Taken together, these findings suggest that **Lake Erie and Lake Ontario are facing more severe pollution issues than the other Great Lakes**. The average phosphorous level for these Great Lakes are summarized in Table 4 below.
+<br>
+
+```{r, include=TRUE}
+# Summary the mean phosphorous level for different lakes
+mean_lake_table <- data.frame(Lake = c("Lake Ontario","Lake Erie",
+                                "Lake Huron","Lake Superior"),
+                              MeanPhosphorousLevel =
+                                c(mean(water_phos_with_city[water_phos_with_city$lake == "LAKE ONTARIO",]$value),
+                                mean(water_phos_with_city[water_phos_with_city$lake == "LAKE ERIE",]$value),
+                                mean(water_phos_with_city[water_phos_with_city$lake == "LAKE HURON",]$value),
+                                mean(water_phos_with_city[water_phos_with_city$lake == "LAKE SUPERIOR",]$value))
+         )
+
+datatable(
+  mean_lake_table, 
+  options = list(
+    scrollX = FALSE, 
+    scrollY = FALSE,
+    paging = FALSE,
+    dom = 't'
+  ),
+  rownames = FALSE,
+  caption = "Table 4 - Summary Table for mean phosphorous level for each Great lake"
+) %>%
+formatStyle(
+  columns = 1:22,
+  border = "1px solid black"
+)
+```
+<br>
+In order to identify where the extreme phosphorus values for Lake Ontario and Lake Erie are located in <a href='#Fig3'>Figure 3</a>, we take a closer look at the <a href='#lf2'>Leaflet 2</a> to visualize the data by city. We observe that the West Coast of both lakes has a darker color, indicating worse water quality. Some of the most polluted cities include Hamilton, ON, Canada; Niagara Falls, NY, USA; Toledo, OH, USA; Sandusky, OH, USA; and Cleveland, OH, USA. If there are multiple polluted cities located close to each other, we only select one to interpret the data. It is worth noting that Toronto, ON, Canada, which is a major city in Canada, is also listed as one of the most polluted cities in some time periods.
+
+```{r, include=TRUE}
+# Summary the mean phosphorous level for different lakes
+mean_city_table <- data.frame(City = c("Hamilton, ON, Canada","Niagara Falls, NY, USA",
+                                "Toronto, ON, Canada","Toledo, OH, USA",
+                                "Sandusky, OH, USA", "Cleveland, OH, USA"),
+                              Lake = c("Lake Ontario","Lake Ontario","Lake Ontario",
+                                       "Lake Erie","Lake Erie","Lake Erie"),
+                              MeanPhosphorousLevel =
+                                c(mean(water_phos_with_city[water_phos_with_city$city == "Hamilton, ON, Canada",]$value),
+                                mean(water_phos_with_city[water_phos_with_city$city == "Niagara Falls, NY, USA",]$value),
+                                mean(water_phos_with_city[water_phos_with_city$city == "Toronto, ON, Canada",]$value),
+                                mean(water_phos_with_city[water_phos_with_city$city == "Toledo, OH, USA",]$value),
+                                mean(water_phos_with_city[water_phos_with_city$city == "Sandusky, OH, USA",]$value),
+                                mean(water_phos_with_city[water_phos_with_city$city == "Cleveland, OH, USA",]$value)
+                               )
+         )
+
+datatable(
+  mean_city_table, 
+  options = list(
+    scrollX = FALSE, 
+    scrollY = FALSE,
+    paging = FALSE,
+    dom = 't'
+  ),
+  rownames = FALSE,
+  caption = "Table 5 - Summary Table for mean phosphorous level for selected cities"
+) %>%
+formatStyle(
+  columns = 1:22,
+  border = "1px solid black"
+)
+```
+<br>
+Based on the summary statistics for mean phosphorous level in the selected cities presented in Table 5, it is evident that, with the exception of Toronto, all other cities have significantly higher phosphorous levels than the average value for their respective lakes in Table 4. Moreover, these cities consistently have darker colors in most time periods in <a href='#lf2'>Leaflet 2</a>, indicating a higher level of pollution. Therefore, we can conclude that the **west coasts of Lake Erie and Lake Ontario are the most polluted areas from 2000 to present**. Including the following cities: Hamilton, ON, Canada; Niagara Falls, NY, USA; Toledo, OH, USA; Sandusky, OH, USA; Detroit Lake, OH; and Cleveland, OH, USA.
+
+Secondly, we will investigate whether there is evidence of improvement in water quality at the identified locations from 2000 to the present. To address this question, we will start by examining <a href='#lf1'>Leaflet 1 and 2</a>. By choosing different time periods, we notice that the colors for the periods 2015-2020 and 2020-present are significantly darker than that of 2000-2005. This change is especially noticeable at the west coasts of Lake Ontario and the entire Lake Erie, where we identified as the most polluted areas.
+
+Another evidence of worsening water quality over time is shown in <a href='#Fig1'>Figure 2</a>. Initially, Lake Erie had an average phosphorus value around 0.013 in 2000, and it eventually reached around 0.02 near 2020, especially for the time after 2015. Both Lake Ontario and Lake Erie show a constant increase in water pollution. Regarding the question of improvement, we can conclude that there is no evidence of improvement in water quality for the identified locations from 2000 to the present.
+
+To test whether there is an evidence of decreasing water quality among these areas, we will add separate linear fit to these cities (Shown in the Figure 4 below).
+
+<br>
+```{r}
+# Filter data with our 6 most-polluted cities in Lake Erie and Hamilton
+interst_city <- water_phos_with_city %>% filter(city == "Hamilton, ON, Canada" |
+                                                city == "Niagara Falls, NY, USA" |
+                                                city == "Toronto, ON, Canada" |
+                                                city == "Toledo, OH, USA" |
+                                                city == "Sandusky, OH, USA" |
+                                                city == "Cleveland, OH, USA")
+```
+
+```{r, include=TRUE}
+# Plot these data with a linear fit
+ggplot(interst_city, aes(x = yearmon, y = value, color = city)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y~x) +
+  theme_minimal() +
+  facet_wrap(~city) +
+  scale_fill_brewer(palette = "Set1") +
+  scale_x_continuous(guide = guide_axis(check.overlap = TRUE))+
+  labs(title = "Figure 4 - Time series for phosphorous value of 6 most-polluted cities with Linear fit", x = "Lake", y = "Year")
+```
+<br>
+The main observation from Figure 4 is that there is a positive relationship between the phosphorus level and time for the west-coast cities, includes Cleveland, Hamilton, Sandusky, and Toledo. In contrast, Toronto and Niagara Falls, which are located near the center of Lake Ontario, have less evidence of worse water quality over the years, as indicated by the relatively flat trend line for phosphorus levels in these cities. This finding is consistent with our previous observation that the west coast of Lake Erie and Lake Ontario are more polluted than other areas. 
+
+```{r}
+# Summary linear fit
+modelHamil <- lm(value~yearmon, data = interst_city[interst_city$city == "Hamilton, ON, Canada",])
+modelNia <- lm(value~yearmon, data = interst_city[interst_city$city == "Niagara Falls, NY, USA",])
+modelTor <- lm(value~yearmon, data = interst_city[interst_city$city == "Toronto, ON, Canada",])
+modelTol <- lm(value~yearmon, data = interst_city[interst_city$city == "Toledo, OH, USA",])
+modelSan <- lm(value~yearmon, data = interst_city[interst_city$city == "Sandusky, OH, USA",])
+modelCle <- lm(value~yearmon, data = interst_city[interst_city$city == "Cleveland, OH, USA",])
+
+coefficient_summary <- data.frame(City = c("Hamilton, ON, Canada","Niagara Falls, NY, USA",
+                    "Toronto, ON, Canada","Toledo, OH, USA",
+                    "Sandusky, OH, USA","Cleveland, OH, USA"),
+           Coefficient = c(coef(modelHamil)[2], coef(modelNia)[2], 
+                           coef(modelTor)[2], coef(modelTol)[2],
+                           coef(modelSan)[2], coef(modelCle)[2]),
+           Pvalue = c(coef(summary(modelHamil))[, "Pr(>|t|)"][2], coef(summary(modelNia))[, "Pr(>|t|)"][2], 
+                           coef(summary(modelTor))[, "Pr(>|t|)"][2], coef(summary(modelTol))[, "Pr(>|t|)"][2],
+                           coef(summary(modelSan))[, "Pr(>|t|)"][2], coef(summary(modelCle))[, "Pr(>|t|)"][2])
+             )
+```
+
+```{r, include=TRUE}
+# Display linear fit summary table
+datatable(
+  coefficient_summary, 
+  options = list(
+    scrollX = FALSE, 
+    scrollY = FALSE,
+    paging = FALSE,
+    dom = 't'
+  ),
+  rownames = FALSE,
+  caption = "Table 6 - Coefficient and P-value for variable yearmon in Linear Model"
+) %>%
+formatStyle(
+  columns = 1:22,
+  border = "1px solid black"
+)
+```
+<br>
+Based on the Linear Model summary in the Table 6 above, it verified that the water quality is quite consistent at Centre Lake Ontario. But for west coasts, it shows a positive relationship between Cleveland, Hamilton and Sandusky with p-value less than 0.05 (or near 0.05). the p-value (0.67) for the overall water quality in Toledo rejects the linear relationship. However, by examining the scatter plot of phosphorus levels over time for Toledo, we can observe a non-linear relationship, with strong evidence of worsening water quality after 2015. Based on these information, we can answer the second part of the research question that: **For those most polluted cities, which are in west coast of Lake Ontario and Lake Erie, the water quality is getting even worse by years.**
+
+
+
+## Conclution
+
+The study aims to identify the locations in the Great Lakes region with the worst water quality and whether there is evidence of improvements from 2000 to the present. The study finds that Lake Erie and Lake Ontario are facing more severe pollution issues than other Great Lakes. Especially for the west coast of the Lake Ontario and the west coast of the Lake Erie, including the cities: Hamilton, Niagara Falls, Toledo, Sandusky, Detroit Lake, and Cleveland. There is a positive relationship between phosphorus levels and time for these west-coast cities. The study concludes that the water quality is getting even worse by years for those most polluted cities on the west coast of Lake Ontario and Lake Erie. 
+
+The result suggests that efforts to improve water quality in these polluted areas may not have been effective or sufficient to reverse the trend of increasing phosphorus levels in recent years. Further investigations into the causes of the increasing phosphorus levels and the effectiveness of past and current interventions are warranted to address this issue.
