@@ -1,0 +1,15 @@
+Dataset,Variable Old Name,Variable New Name,Type,Description
+water_phos,WATER_BODY,lake,character,"Location of the stations in ""LAKE HURON"", ""LAKE ERIE"", ""LAKE ONTARIO"", ""LAKE SUPERIOR"""
+water_phos,PSN,station,character,"The unique id of water station, in the format of ""WATER_BODY PSN"""
+water_phos,STN_DATE,year,integer,The year of the sample is collected
+water_phos,STN_DATE,month,integer,The month of the sample is collected
+water_phos,STN_DATE,yearmon,yearmon,"The yearmon of the sample is collected in the format ""YYYY-MM"""
+water_phos,STN_DATE,range,character,"The time period of the sample is collected in ""2000-2005"", ""2005-2010"", '2010-2015"", ""2015-2020"", ""2020-present"""
+water_phos,FULL_NAME,hazard_name,character,The name of tested chemicals
+water_phos,VALUE,value,double,The result of tested chemicals
+water_phos,LATITUDE_DD,lat,double,The latitude of the water station
+water_phos,LONGITUDE_DD,lon,double,The longitude of the water station
+water_phos,VALUE,level,character,"Lable each observation based on its value: value < 0.1 is ""Good"", 0.1 <= value < 0.25 is ""Poor"", otherwise ""Very Bad"""
+lake_city,NA,Place Name,character,The city/town's name
+lake_city,Latitude,lat_city,double,The latitude of the city/town
+lake_city,Longitude,lon_city,double,The longitude of the city/town
